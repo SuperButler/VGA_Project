@@ -1,0 +1,107 @@
+`timescale 1ns / 1ps
+
+module ColourStripes #(
+    parameter COUNTER_WIDTH = 32,
+    parameter COUNT_FROM    = 0,
+    parameter COUNT_TO      = 32'b1 << 26)
+    (input clk, rst,
+     input [10:0] row, col,
+     output [3:0] red, green, blue);
+
+// Named colours (R,G,B nibbles)
+localparam [11:0] BLACK  = 12'h000,
+                  ORANGE = 12'hF80,
+                  BLUE   = 12'h00F,
+                  RED    = 12'hF00,
+                  CYAN   = 12'h0FF,
+                  PURPLE = 12'h80F,
+                  YELLOW = 12'hFF0,
+                  GREEN  = 12'h0F0,
+                  BORDER = 12'h225;
+
+reg [2:0]  step;                 // replaces S00..S07 (wraps 7 -> 0 on its own)
+reg [COUNTER_WIDTH-1:0] count;
+reg [11:0] color;
+reg [10:0] bx0, bx1, by0, by1;   // moving block rectangle
+reg [3:0]  red_reg, green_reg, blue_reg;
+
+// Rectangle test: x0 <= c < x1 and y0 <= r < y1
+function in_rect;
+    input [10:0] c, r, x0, y0, x1, y1;
+    in_rect = (c >= x0 && c < x1 && r >= y0 && r < y1);
+endfunction
+
+// Moving block position for each step (this is your only per-state data)
+always @* begin
+    case (step)
+        3'd0:    begin bx0 = 200; bx1 = 360; by0 =  0; by1 =  40; end
+        3'd1:    begin bx0 = 240; bx1 = 400; by0 =  0; by1 =  40; end
+        3'd2:    begin bx0 = 280; bx1 = 440; by0 =  0; by1 =  40; end
+        3'd3:    begin bx0 = 280; bx1 = 440; by0 = 40; by1 =  80; end
+        3'd4:    begin bx0 = 360; bx1 = 400; by0 =  0; by1 = 160; end
+        3'd5:    begin bx0 = 360; bx1 = 400; by0 = 40; by1 = 200; end
+        3'd6:    begin bx0 = 400; bx1 = 440; by0 = 40; by1 = 200; end
+        default: begin bx0 = 440; bx1 = 480; by0 = 40; by1 = 200; end
+    endcase
+end
+
+// Drawing: written once, later lines draw on top of earlier ones
+always @* begin
+    color = BLACK;                                              // background
+
+    if (in_rect(col,row,   0,0, 120,480) ||
+        in_rect(col,row, 520,0, 640,480)) color = BORDER;       // borders
+
+    // Static pieces: in_rect(col,row, x0,y0, x1,y1)
+    if (in_rect(col,row, 120,440, 240,480) ||
+        in_rect(col,row, 200,400, 240,440)) color = ORANGE;     // L
+    if (in_rect(col,row, 240,440, 360,480) ||
+        in_rect(col,row, 240,400, 280,440)) color = BLUE;       // J
+    if (in_rect(col,row, 320,400, 400,440) ||
+        in_rect(col,row, 360,440, 440,480)) color = RED;        // Z
+    if (in_rect(col,row, 400,400, 480,440) ||
+        in_rect(col,row, 440,320, 480,400)) color = BLUE;       // J
+    if (in_rect(col,row, 120,280, 160,440)) color = CYAN;       // I
+    if (in_rect(col,row, 160,360, 200,440) ||
+        in_rect(col,row, 200,320, 240,400)) color = RED;        // Z
+    if (in_rect(col,row, 240,360, 280,400) ||
+        in_rect(col,row, 280,320, 320,440)) color = PURPLE;     // T
+    if (in_rect(col,row, 320,320, 400,400)) color = YELLOW;     // O
+    if (in_rect(col,row, 200,240, 240,320) ||
+        in_rect(col,row, 240,280, 280,360)) color = GREEN;      // S
+
+    // Moving block
+    if (in_rect(col,row, bx0,by0, bx1,by1)) color = CYAN;
+end
+
+// One counter, one step register
+always @(posedge clk, posedge rst) begin
+    if (rst) begin
+        count <= COUNT_FROM;
+        step  <= 3'd0;
+    end
+    else if (count == COUNT_TO) begin
+        count <= 0;
+        step  <= step + 1'b1;    // 3 bits, so 7 + 1 wraps back to 0
+    end
+    else
+        count <= count + 1'b1;
+end
+
+// Register RGB outputs
+always @(posedge clk, posedge rst) begin
+    if (rst) begin
+        red_reg <= 4'hF; green_reg <= 4'hF; blue_reg <= 4'hF;
+    end
+    else begin
+        red_reg   <= color[11:8];
+        green_reg <= color[7:4];
+        blue_reg  <= color[3:0];
+    end
+end
+
+assign red   = red_reg;
+assign green = green_reg;
+assign blue  = blue_reg;
+
+endmodule
